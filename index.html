@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Visualización Segmentada de Música</title>
+  <style>
+    body {
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      align-items: center;
+      height: 100vh;
+      background: #000; /* Fondo negro */
+      color: white;
+      font-family: Arial, sans-serif;
+      overflow: hidden;
+    }
+
+    .visualizer {
+      display: flex;
+      justify-content: space-evenly;
+      align-items: flex-end;
+      width: calc(100% - 2in); /* Margen de 1 pulgada a los lados */
+      height: 50vh; /* 50% de la altura */
+      margin: auto;
+    }
+
+    .bar {
+      display: flex;
+      flex-direction: column-reverse; /* Inicia desde abajo hacia arriba */
+      justify-content: flex-start;
+      align-items: center;
+      margin: 0 1px; /* Reducir el espacio entre barras */
+      width: 45px; /* Aumentar el ancho de las barras */
+    }
+
+    .segment {
+      width: 100%;
+      height: 12px; /* Aumentar la altura de los segmentos */
+      margin: 1px;
+      background: #00ff00; /* Verde inicial */
+      border-radius: 2px;
+    }
+
+    .controls {
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+      width: 100%;
+      padding: 10px 0;
+      position: absolute;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.8);
+    }
+
+    button, label {
+      padding: 8px 15px;
+      background: rgba(40, 40, 40, 0.8);
+      color: white;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background 0.3s, transform 0.2s;
+    }
+
+    button:hover, label:hover {
+      background: rgba(60, 60, 60, 0.9);
+      transform: scale(1.05);
+    }
+
+    input[type="file"] {
+      display: none;
+    }
+
+    .clock {
+      position: absolute;
+      bottom: 10px;
+      right: 20px;
+      font-size: 16px;
+      color: white;
+      font-family: monospace;
+      background: rgba(0, 0, 0, 0.6);
+      padding: 5px 10px;
+      border-radius: 5px;
+    }
+  </style>
+</head>
+<body>
+  <div class="visualizer" id="visualizer"></div>
+
+  <div class="controls">
+    <label for="audioInput">Elegir audios</label>
+    <button id="playPauseButton">Reproducir</button>
+    <input type="range" id="volumeControl" min="0" max="1" step="0.01" value="0.5">
+  </div>
+
+  <div class="clock" id="clock"></div>
+  <input type="file" id="audioInput" accept="audio/*" multiple>
+
+  <script>
+    const visualizer = document.getElementById("visualizer");
+    const audioInput = document.getElementById("audioInput");
+    const playPauseButton = document.getElementById("playPauseButton");
+    const volumeControl = document.getElementById("volumeControl");
+    const clockElement = document.getElementById("clock");
+
+    const NUM_BARS = 30;  // Número de barras
+    const SEGMENTS = 15;  // Segmentos por barra
+    let audioContext, analyser, dataArray;
+    let currentAudioIndex = 0;
+    let audioQueue = [];
+    let audioElement;
+    let isPlaying = false;
+
+    // Crear barras con segmentos
+    for (let i = 0; i < NUM_BARS; i++) {
+      const bar = document.createElement("div");
+      bar.classList.add("bar");
+
+      for (let j = 0; j < SEGMENTS; j++) {
+        const segment = document.createElement("div");
+        segment.classList.add("segment");
+        bar.appendChild(segment);
+      }
+
+      visualizer.appendChild(bar);
+    }
+
+    const bars = document.querySelectorAll(".bar");
+
+    function loadAudioQueue(files) {
+      audioQueue = Array.from(files);
+      currentAudioIndex = 0;
+      if (audioQueue.length > 0) loadAudio(audioQueue[currentAudioIndex]);
+    }
+
+    function loadAudio(file) {
+      if (audioElement) audioElement.pause();
+      audioElement = new Audio(URL.createObjectURL(file));
+      audioElement.volume = volumeControl.value;
+      audioElement.addEventListener("ended", playNextAudio);
+      setupAudioContext();
+    }
+
+    function setupAudioContext() {
+      if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      const audioSource = audioContext.createMediaElementSource(audioElement);
+      analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      dataArray = new Uint8Array(analyser.frequencyBinCount);
+      audioSource.connect(analyser);
+      analyser.connect(audioContext.destination);
+    }
+
+    function playNextAudio() {
+      currentAudioIndex++;
+      if (currentAudioIndex < audioQueue.length) {
+        loadAudio(audioQueue[currentAudioIndex]);
+        audioElement.play();
+      } else {
+        isPlaying = false;
+        playPauseButton.textContent = "Reproducir";
+      }
+    }
+
+    playPauseButton.addEventListener("click", () => {
+      if (!audioQueue.length) return;
+      if (isPlaying) {
+        audioElement.pause();
+        isPlaying = false;
+        playPauseButton.textContent = "Reproducir";
+      } else {
+        audioElement.play();
+        isPlaying = true;
+        playPauseButton.textContent = "Pausar";
+        animate();
+      }
+    });
+
+    audioInput.addEventListener("change", (event) => {
+      loadAudioQueue(event.target.files);
+    });
+
+    volumeControl.addEventListener("input", (event) => {
+      if (audioElement) audioElement.volume = event.target.value;
+    });
+
+    function animate() {
+      if (!isPlaying) return;
+      analyser.getByteFrequencyData(dataArray);
+      bars.forEach((bar, index) => {
+        const segments = bar.childNodes;
+        const value = dataArray[index] || 0;
+        const activeSegments = Math.floor((value / 255) * SEGMENTS);
+
+        segments.forEach((segment, i) => {
+          if (i < activeSegments) {
+            if (i < SEGMENTS * 0.5) {
+              segment.style.background = "#00ff00"; // Verde
+            } else if (i < SEGMENTS * 0.8) {
+              segment.style.background = "#ffff00"; // Amarillo
+            } else {
+              segment.style.background = "#ff0000"; // Rojo
+            }
+          } else {
+            segment.style.background = "transparent"; // Inactivo
+          }
+        });
+      });
+      requestAnimationFrame(animate);
+    }
+
+    function updateClock() {
+      const now = new Date();
+      const hours = now.getHours().toString().padStart(2, "0");
+      const minutes = now.getMinutes().toString().padStart(2, "0");
+      const seconds = now.getSeconds().toString().padStart(2, "0");
+      clockElement.textContent = `${hours}:${minutes}:${seconds}`;
+    }
+
+    setInterval(updateClock, 1000);
+    updateClock();
+  </script>
+</body>
+</html>
